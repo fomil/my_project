@@ -1,7 +1,4 @@
 
-/*
-cards
-*/
 
 create table cards(
 	card_num varchar(128), 
@@ -597,9 +594,6 @@ insert into cards (card_num, account, create_dt, update_dt)
 values ('2696 7847 9960 9133', 	'40817810852586260772', '2001-01-01', null);
 
 
-/*
-accounts
-*/
 
 
 create table accounts(
@@ -767,9 +761,6 @@ insert into accounts (account, valid_to, client, create_dt, update_dt)
 	values ('40817810592093363417',		'2021-03-02',		'VIP-6237', '1900-01-01', null);
 
 
-/*
-clients
-*/
 
 
 create table clients(
