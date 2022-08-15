@@ -39,6 +39,10 @@ def xlsx2sql(path, table_name):
 	shutil.move(path, new_path)
 	print('Import successfully!')
 
+def showTable(table_name):
+	cursor.execute('select * from ' + table_name)
+	for row in cursor.fetchall():
+		print(row)
 
 def init_transactions():
 	cursor.execute('''
@@ -61,154 +65,18 @@ def init_passport_blacklist():
 			);
 	''')
 
-# def init_terminals():
-# 	cursor.execute('''
-# 		CREATE TABLE if not exists DWH_DIM_terminals_HIST(
-# 			terminal_id varchar(128),
-# 			terminal_type varchar(128),
-# 			terminal_city varchar(128),
-# 			terminal_address varchar(128),
-# 			effective_from datetime default current_timestamp,
-# 			effective_to default (datetime('2999-12-31 23:59:59')),
-# 			deleted_flg integer default 0
-# 			);
-# 	''')
-
-
-def init_terminals_hist():
+def init_terminals():
 	cursor.execute('''
 		CREATE TABLE if not exists DWH_DIM_terminals_HIST(
 			terminal_id varchar(128),
 			terminal_type varchar(128),
 			terminal_city varchar(128),
 			terminal_address varchar(128),
-			deleted_flg integer default 0,
 			effective_from datetime default current_timestamp,
-			effective_to default (datetime('2999-12-31 23:59:59'))
-			
+			effective_to default (datetime('2999-12-31 23:59:59')),
+			deleted_flg integer default 0
 			);
 	''')
-	cursor.execute('''
-		CREATE VIEW if not exists v_terminals as
-			select
-				terminal_id,
-				terminal_type,
-				terminal_city,
-				terminal_address				
-			from DWH_DIM_terminals_HIST
-			where current_timestamp between effective_from and effective_to and deleted_flg = 0
-		''')
-
-
-def createnewRows():
-	cursor.execute('''
-		CREATE TABLE if not exists STG_new_rows as
-			select
-				t1.terminal_id,
-				t1.terminal_type,
-				t1.terminal_city,
-				t1.terminal_address
-			from STG_terminals t1
-			left join v_terminals t2
-			on t1.terminal_id = t2.terminal_id
-			where t2.terminal_id is null
-		''')
-
-def createDeletedRows():
-	cursor.execute('''
-		CREATE TABLE if not exists STG_deleted_rows as
-			select
-				t1.terminal_id,
-				t1.terminal_type,
-				t1.terminal_city,
-				t1.terminal_address
-			from v_terminals t1
-			left join STG_terminals t2
-			on t1.terminal_id = t2.terminal_id
-			where t2.terminal_id is null
-		''')
-
-def createChangedRows():
-	cursor.execute('''
-		CREATE TABLE if not exists STG_changed_rows as
-			select
-				t1.terminal_id,
-				t1.terminal_type,
-				t1.terminal_city,
-				t1.terminal_address
-			from STG_terminals t1
-			inner join v_terminals t2
-			on t1.terminal_id = t2.terminal_id
-			and(   t1.terminal_id        <> t2.terminal_id 
-				or t1.terminal_type      <> t2.terminal_type 
-				or t1.terminal_city      <> t2.terminal_city 
-				or t1.terminal_address   <> t2.terminal_address )
-		''')
-
-def update_terminals_hist():
-	cursor.execute('''
-		INSERT INTO DWH_DIM_terminals_HIST(
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address
-	) 	select
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address
-		from STG_new_rows
-	''')
-
-	cursor.execute('''
-		UPDATE DWH_DIM_terminals_HIST
-		set effective_to = datetime('now', '-1 second')
-		where terminal_id in (select terminal_id from STG_changed_rows)
-		and effective_to = datetime('2999-12-31 23:59:59')
-		''')
-	cursor.execute('''
-		INSERT INTO DWH_DIM_terminals_HIST(
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address
-	) 	select
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address
-		from STG_changed_rows
-	''')
-
-	cursor.execute('''
-		UPDATE DWH_DIM_terminals_HIST
-		set effective_to = datetime('now', '-1 second')
-		where terminal_id in (select terminal_id from STG_deleted_rows)
-		and effective_to = datetime('2999-12-31 23:59:59')
-		''')
-	cursor.execute('''
-		INSERT INTO DWH_DIM_terminals_HIST(
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address,
-			deleted_flg
-	) 	select
-			terminal_id,
-			terminal_type,
-			terminal_city,
-			terminal_address,
-			1
-		from STG_deleted_rows
-	''')
-
-	conn.commit()
-
-def showTable(table_name):
-	cursor.execute('select * from ' + table_name)
-	for row in cursor.fetchall():
-		print(row)
-
 
 def init_reports():
 	cursor.execute('''
@@ -221,7 +89,6 @@ def init_reports():
 		report_dt date
 			);
 	''')
-
 
 def scam_catcher_type_1_1():
 	cursor.execute('''
@@ -417,13 +284,6 @@ def scam_catcher_type_4():
 
 
 conn.commit()
-
-def delete_tmp_tables():
-	cursor.execute('DROP TABLE if exists STG_terminals')
-	cursor.execute('DROP TABLE if exists STG_new_rows')
-	cursor.execute('DROP TABLE if exists STG_deleted_rows')
-	cursor.execute('DROP TABLE if exists STG_changed_rows')
-
 #conn.close()
 
 # def backup_file(path):
@@ -433,104 +293,51 @@ def delete_tmp_tables():
 
 init_source_data()
 init_transactions()
-init_terminals_hist()
+init_terminals()
 init_passport_blacklist()
 init_reports()
 
 csv2sql('transactions_01032021.txt','DWH_FACT_transactions',';')
 xlsx2sql('passport_blacklist_01032021.xlsx', 'DWH_FACT_passport_blacklist')
-xlsx2sql('terminals_01032021.xlsx','STG_terminals')
+xlsx2sql('terminals_01032021.xlsx','DWH_DIM_terminals_HIST')
 print(' ')
-
-createnewRows()
-createDeletedRows()
-createChangedRows()
-update_terminals_hist()
-
-
-print('_-new-_'*20)
-showTable('STG_new_rows')
-print('_-deleted-_'*20)
-showTable('STG_deleted_rows')
-print('_-changed-_'*20)
-showTable('STG_changed_rows')
-
-
 scam_catcher_type_1_1()
 scam_catcher_type_1_2()
 scam_catcher_type_2()
 scam_catcher_type_3()
 # scam_catcher_type_4()
-print('_-start report-_'*20)
 showTable('REP_FRAUD')
-print('_-end report-_'*20)
-print(' ')
-print('>> start_analize_next_day ' * 5)
-print(' ')
-delete_tmp_tables()
-
-csv2sql('transactions_02032021.txt','DWH_FACT_transactions',';')
-xlsx2sql('passport_blacklist_02032021.xlsx', 'DWH_FACT_passport_blacklist')
-xlsx2sql('terminals_02032021.xlsx','STG_terminals')
-print(' ')
-
-createnewRows()
-createDeletedRows()
-createChangedRows()
-update_terminals_hist()
-
-
-print('_-new-_'*20)
-showTable('STG_new_rows')
-print('_-deleted-_'*20)
-showTable('STG_deleted_rows')
-print('_-changed-_'*20)
-showTable('STG_changed_rows')
-
-
-scam_catcher_type_1_1()
-scam_catcher_type_1_2()
-scam_catcher_type_2()
-scam_catcher_type_3()
-# scam_catcher_type_4()
-print('_-start report-_'*20)
-showTable('REP_FRAUD')
-print('_-end report-_'*20)
 print(' ')
 print('>> start_analize_next_day ' * 5)
 print(' ')
 
+# csv2sql('transactions_02032021.txt','DWH_FACT_transactions',';')
+# xlsx2sql('passport_blacklist_02032021.xlsx', 'DWH_FACT_passport_blacklist')
+# xlsx2sql('terminals_02032021.xlsx','DWH_DIM_terminals_HIST')
+# print(' ')
+# scam_catcher_type_1_1()
+# scam_catcher_type_1_2()
+# scam_catcher_type_2()
+# scam_catcher_type_3()
+# # scam_catcher_type_4()
+# showTable('REP_FRAUD')
+# print(' ')
+# print('>> start_analize_next_day ' * 5)
+# print(' ')
 
-csv2sql('transactions_03032021.txt','DWH_FACT_transactions',';')
-xlsx2sql('passport_blacklist_03032021.xlsx', 'DWH_FACT_passport_blacklist')
-xlsx2sql('terminals_03032021.xlsx','STG_terminals')
-print(' ')
 
-createnewRows()
-createDeletedRows()
-createChangedRows()
-update_terminals_hist()
-
-
-print('_-new-_'*20)
-showTable('STG_new_rows')
-print('_-deleted-_'*20)
-showTable('STG_deleted_rows')
-print('_-changed-_'*20)
-showTable('STG_changed_rows')
-
-scam_catcher_type_1_1()
-scam_catcher_type_1_2()
-scam_catcher_type_2()
-scam_catcher_type_3()
-# scam_catcher_type_4()
-print('_-start report-_'*20)
-showTable('REP_FRAUD')
-print('_-end report-_'*20)
-print(' ')
-print(' >< finished_analize_last_day >< ' * 5)
-
-delete_tmp_tables()
+# csv2sql('transactions_03032021.txt','DWH_FACT_transactions',';')
+# xlsx2sql('passport_blacklist_03032021.xlsx', 'DWH_FACT_passport_blacklist')
+# xlsx2sql('terminals_03032021.xlsx','DWH_DIM_terminals_HIST')
+# print(' ')
+# scam_catcher_type_1_1()
+# scam_catcher_type_1_2()
+# scam_catcher_type_2()
+# scam_catcher_type_3()
+# # scam_catcher_type_4()
+# showTable('REP_FRAUD')
+# print(' ')
+# print(' >< finished_analize_last_day >< ' * 5)
 
 conn.commit()
 
