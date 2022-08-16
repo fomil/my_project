@@ -196,6 +196,34 @@ def showTable(table_name):
 	for row in cursor.fetchall():
 		print(row)
 
+def make_meta_db():
+	cursor.execute('''
+		CREATE TABLE if not exists META_bank_db(
+			table_name varchar(128),
+			columm_name varchar(128),
+			type varchar(128)
+			);
+	''')
+	cursor.execute('''
+		INSERT INTO META_bank_db(
+			table_name,
+			columm_name,
+			type
+	) 	SELECT
+			m.name as table_name, 
+  			p.name as column_name,
+  			m.type as type
+  			
+		FROM 
+  			sqlite_master AS m
+		JOIN 
+  			pragma_table_info(m.name) AS p
+		ORDER BY 
+  			m.name, 
+  			p.cid
+	''')
+
+	conn.commit()
 
 def init_reports():
 	cursor.execute('''
@@ -212,7 +240,7 @@ def init_reports():
 
 def scam_catcher_type_1_1():
 	cursor.execute('''
-		INSERT INTO REP_FRAUD(
+		INSERT INTO REP_FRAUD (
 			event_dt,
 			passport_num,
 			FIO,
@@ -295,7 +323,7 @@ def scam_catcher_type_2():
  		join DWH_FACT_transactions t4
      		on t4.card_num = t3.card_num
  		left join DWH_FACT_passport_blacklist t5
-     		on t5.passport = t1.passport_numcd 
+     		on t5.passport = t1.passport_num 
  		where t4.transaction_date > t2.valid_to
  		GROUP BY FIO
  		;
@@ -520,6 +548,9 @@ print(' ')
 print(' >< finished_analize_last_day >< ' * 5)
 
 delete_tmp_tables()
+
+make_meta_db()
+showTable('META_bank_db')
 
 # conn.commit()
 
