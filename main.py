@@ -9,7 +9,8 @@ import os
 conn = sqlite3.connect('bank.db')
 cursor = conn.cursor()
 
-# init source data from sql_scripts
+# init raw data from sql_scripts and transform table names
+
 def init_source_data():
 	print('Creating source data tables...')
 	with open('./sql_scripts/ddl_dml.sql', 'r', encoding='utf-8') as f:
@@ -60,20 +61,6 @@ def init_passport_blacklist():
 			entry_dt date
 			);
 	''')
-
-# def init_terminals():
-# 	cursor.execute('''
-# 		CREATE TABLE if not exists DWH_DIM_terminals_HIST(
-# 			terminal_id varchar(128),
-# 			terminal_type varchar(128),
-# 			terminal_city varchar(128),
-# 			terminal_address varchar(128),
-# 			effective_from datetime default current_timestamp,
-# 			effective_to default (datetime('2999-12-31 23:59:59')),
-# 			deleted_flg integer default 0
-# 			);
-# 	''')
-
 
 def init_terminals_hist():
 	cursor.execute('''
@@ -233,8 +220,7 @@ def scam_catcher_type_1_1():
 			event_type,
 			report_dt)
 		select 
-     		-- min(transaction_date) as event_dt,
-     		transaction_date as event_dt,
+     		min(transaction_date) as event_dt,
      		passport_num,
      		last_name ||' '||first_name||' '||patronymic as FIO,
      		phone,
@@ -250,7 +236,7 @@ def scam_catcher_type_1_1():
  		left join DWH_FACT_passport_blacklist t5
      		on t5.passport = t1.passport_num
  		where t4.transaction_date > t1.passport_valid_to
- 		-- GROUP BY FIO
+ 		GROUP BY FIO
  		;
 	''')
 
@@ -264,8 +250,7 @@ def scam_catcher_type_1_2():
 			event_type,
 			report_dt)
 		select 
-     		-- min(transaction_date) as event_dt,
-     		transaction_date as event_dt,
+     		min(transaction_date) as event_dt,
      		passport_num,
      		last_name ||' '||first_name||' '||patronymic as FIO,
      		phone,
@@ -281,7 +266,7 @@ def scam_catcher_type_1_2():
  		left join DWH_FACT_passport_blacklist t5
      		on t5.passport = t1.passport_num
  		where t4.transaction_date > t5.date
- 		-- GROUP BY FIO
+ 		GROUP BY FIO
  		;
 	''')
 
@@ -296,8 +281,7 @@ def scam_catcher_type_2():
 			event_type,
 			report_dt
 	) 	select
-     		-- min(transaction_date) as event_dt,
-     		transaction_date as event_dt,
+     		min(transaction_date) as event_dt,
      		passport_num as passport,
      		last_name ||' '||first_name||' '||patronymic as FIO,
      		phone,
@@ -311,9 +295,9 @@ def scam_catcher_type_2():
  		join DWH_FACT_transactions t4
      		on t4.card_num = t3.card_num
  		left join DWH_FACT_passport_blacklist t5
-     		on t5.passport = t1.passport_num
+     		on t5.passport = t1.passport_numcd 
  		where t4.transaction_date > t2.valid_to
- 		-- GROUP BY FIO
+ 		GROUP BY FIO
  		;
 	''')
 
@@ -334,11 +318,11 @@ def scam_catcher_type_3():
 		     phone,
 		     'Transactions in different cities in less than an hour' as event_type,
 		     t4.transaction_date,
-		     case     
-		         when lag(terminal_city,1,null) over  (partition by t1.passport_num order by t4.transaction_date )!= terminal_city
-	             and (julianday(t4.transaction_date) - julianday(lag(t4.transaction_date,1,null) over  (partition by t1.passport_num order by t4.transaction_date )) ) * 24 < 1   
-	             then 1
-	             else 0 end IS_DIFF_CITY
+		     	case
+		         when lag(terminal_city,1,null) over  (partition by t3.card_num order by t4.transaction_date )!= terminal_city
+	             and (julianday(t4.transaction_date) - julianday(lag(t4.transaction_date,1,null) over  (partition by t3.card_num order by t4.transaction_date )) ) * 24 < 1   
+	             	then 1
+	             	else 0 end IS_DIFF_CITY
 		 from STG_clients t1
 		 join STG_accounts t2
 		     on t1.client_id = t2.client
@@ -351,7 +335,6 @@ def scam_catcher_type_3():
 	     	order by 2,1
 	         	)
 	     	select   
-	     		-- min(event_dt),
 	     		event_dt,
 		    	passport,
 		    	FIO,
@@ -360,7 +343,7 @@ def scam_catcher_type_3():
 		     	date() as report_dt
 		    from cte_pre
 	     where IS_DIFF_CITY = 1
-	     -- GROUP BY FIO
+	     
  		;
 	''')
 
@@ -381,15 +364,22 @@ def scam_catcher_type_4():
     		phone,
     		'selection of the amount with success in 20 minutes' as event_type,
     		t4.transaction_date,
-    		case     
-        		when 
-        		lag(t4.oper_result ,1,null) over  (partition by t1.passport_num order by t4.transaction_date ) = 'REJECT'
-        		and lag(t4.oper_result ,2,null) over  (partition by t1.passport_num order by t4.transaction_date ) = 'REJECT'
-        		and t4.oper_result = 'SUCCESS'
-        		and lag(t4.amount ,1,null) over  (partition by t1.passport_num order by t4.transaction_date ) - t4.amount > 0
-        		and lag(t4.amount ,2,null) over  (partition by t1.passport_num order by t4.transaction_date ) - lag(t4.amount ,1,null) over  (partition by t1.passport_num order by t4.transaction_date ) > 0
-        		and (julianday(t4.transaction_date) - julianday(lag(t4.transaction_date,2,null) over  (partition by t1.passport_num order by t4.transaction_date )) ) * 24 * 60 < 20  
-            		then 1
+    		t4.amount,
+    		t4.oper_result,
+  			lag(t4.oper_result ,1,null) over  (partition by t3.card_num order by t4.transaction_date ) oper_result_prev,
+    		lag(t4.oper_result ,2,null) over  (partition by t3.card_num order by t4.transaction_date ) oper_result_prev2,
+		    
+    		case 
+      			when 
+        		lag(t4.oper_result ,1,null) over  (partition by t3.card_num order by t4.transaction_date ) = 'REJECT'
+        		and lag(t4.oper_result ,2,null) over  (partition by t3.card_num order by t4.transaction_date )='REJECT'
+        		and lag(t4.oper_result ,3,null) over  (partition by t3.card_num order by t4.transaction_date )='REJECT'
+        		and  t4.oper_result='SUCCESS'
+        		and  lag(t4.amount ,1,null) over  (partition by t3.card_num order by t4.transaction_date )-t4.amount>0
+        		and lag(t4.amount ,2,null) over  (partition by t3.card_num order by t4.transaction_date )-lag(t4.amount ,1,null) over  (partition by t3.card_num order by t4.transaction_date ) >0
+        		and lag(t4.amount ,3,null) over  (partition by t3.card_num order by t4.transaction_date )-lag(t4.amount ,2,null) over  (partition by t3.card_num order by t4.transaction_date ) >0
+        		and (julianday(t4.transaction_date) - julianday(lag(t4.transaction_date,3,null) over  (partition by t3.card_num order by t4.transaction_date )) ) * 24*60 <20 
+        			then 1
             		else 0 end IS_20_MIN
 		from STG_clients t1
 		join STG_accounts t2
@@ -402,7 +392,6 @@ def scam_catcher_type_4():
     		on t6.terminal_id = t4.terminal 
     		order by 2,1)
       		select   
-      			-- min(event_dt),
       			event_dt,
     			passport,
     			FIO,
@@ -410,11 +399,10 @@ def scam_catcher_type_4():
     			'selection of the amount with success in 20 minutes' as event_type,
     			date() as report_dt
      		from cte_pre
-    		where IS_20_MIN=1
-    		-- GROUP BY FIO
+    		where IS_20_MIN = 1
+    		
     		;
 	''')	
-
 
 conn.commit()
 
@@ -423,12 +411,9 @@ def delete_tmp_tables():
 	cursor.execute('DROP TABLE if exists STG_new_rows')
 	cursor.execute('DROP TABLE if exists STG_deleted_rows')
 	cursor.execute('DROP TABLE if exists STG_changed_rows')
+	print('All temp tables deleted successfully.')
 
-#conn.close()
-
-# def backup_file(path):
-# 	new_path = './archive/' + path +'.backup'
-# 	shutil.move(path, new_path)
+# start and test area
 
 
 init_source_data()
@@ -448,11 +433,11 @@ createChangedRows()
 update_terminals_hist()
 
 
-print('_-new-_'*20)
+print('_-new-_'*5)
 showTable('STG_new_rows')
-print('_-deleted-_'*20)
+print('_-deleted-_'*5)
 showTable('STG_deleted_rows')
-print('_-changed-_'*20)
+print('_-changed-_'*5)
 showTable('STG_changed_rows')
 
 
@@ -460,14 +445,16 @@ scam_catcher_type_1_1()
 scam_catcher_type_1_2()
 scam_catcher_type_2()
 scam_catcher_type_3()
-# scam_catcher_type_4()
-print('_-start report-_'*20)
+scam_catcher_type_4()
+print('_-start report-_'*5)
 showTable('REP_FRAUD')
-print('_-end report-_'*20)
+print('_-end report-_'*5)
 print(' ')
 print('>> start_analize_next_day ' * 5)
 print(' ')
 delete_tmp_tables()
+
+# add next day data
 
 csv2sql('transactions_02032021.txt','DWH_FACT_transactions',';')
 xlsx2sql('passport_blacklist_02032021.xlsx', 'DWH_FACT_passport_blacklist')
@@ -480,11 +467,11 @@ createChangedRows()
 update_terminals_hist()
 
 
-print('_-new-_'*20)
+print('_-new-_'*5)
 showTable('STG_new_rows')
-print('_-deleted-_'*20)
+print('_-deleted-_'*5)
 showTable('STG_deleted_rows')
-print('_-changed-_'*20)
+print('_-changed-_'*5)
 showTable('STG_changed_rows')
 
 
@@ -492,14 +479,16 @@ scam_catcher_type_1_1()
 scam_catcher_type_1_2()
 scam_catcher_type_2()
 scam_catcher_type_3()
-# scam_catcher_type_4()
-print('_-start report-_'*20)
+scam_catcher_type_4()
+print('_-start report-_'*5)
 showTable('REP_FRAUD')
-print('_-end report-_'*20)
+print('_-end report-_'*5)
 print(' ')
 print('>> start_analize_next_day ' * 5)
 print(' ')
+delete_tmp_tables()
 
+# add another day data 
 
 csv2sql('transactions_03032021.txt','DWH_FACT_transactions',';')
 xlsx2sql('passport_blacklist_03032021.xlsx', 'DWH_FACT_passport_blacklist')
@@ -512,27 +501,27 @@ createChangedRows()
 update_terminals_hist()
 
 
-print('_-new-_'*20)
+print('_-new-_'*5)
 showTable('STG_new_rows')
-print('_-deleted-_'*20)
+print('_-deleted-_'*5)
 showTable('STG_deleted_rows')
-print('_-changed-_'*20)
+print('_-changed-_'*5)
 showTable('STG_changed_rows')
 
 scam_catcher_type_1_1()
 scam_catcher_type_1_2()
 scam_catcher_type_2()
 scam_catcher_type_3()
-# scam_catcher_type_4()
-print('_-start report-_'*20)
+scam_catcher_type_4()
+print('_-start report-_'*5)
 showTable('REP_FRAUD')
-print('_-end report-_'*20)
+print('_-end report-_'*5)
 print(' ')
 print(' >< finished_analize_last_day >< ' * 5)
 
 delete_tmp_tables()
 
-conn.commit()
+# conn.commit()
 
 # showTable('STG_cards')
 # showTable('STG_accounts')
